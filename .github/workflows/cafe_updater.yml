@@ -5,6 +5,9 @@ on:
     - cron: '0 21 * * *'
   workflow_dispatch:
 
+# 로봇에게 저장소 쓰기 권한을 강제로 부여합니다.
+permissions: write-all
+
 jobs:
   update-data:
     runs-on: ubuntu-latest
