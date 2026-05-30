@@ -12,7 +12,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # 토큰 권한을 체크아웃 단계부터 확실하게 매핑합니다.
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
@@ -33,7 +32,6 @@ jobs:
         DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
       run: python update_cafe.py
 
-    # 주소창에 토큰을 직접 심어서 인증 에러(128)를 완벽하게 차단합니다.
     - name: Commit and Push changes
       run: |
         git config --global user.name "github-actions[bot]"
@@ -42,8 +40,8 @@ jobs:
         
         if [ -n "$(git status --porcelain)" ]; then
           git commit -m "🔄 자동 업데이트: 경주 카페 데이터 변경 반영"
-          # 저장소 URL에 GITHUB_TOKEN을 인증 값으로 붙여 강제 푸시합니다.
-          git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" main
+          # 뒤에 main을 명시하지 않고 현재 동작 중인 브랜치로 안전하게 push하도록 수정했습니다.
+          git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
         else
           echo "변경 사항이 없어 커밋을 건너뜁니다."
         fi
