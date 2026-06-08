@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 
 # 1. 깃허브 세팅에 등록해주신 API 인증키 이름인 DATA_GO_KR_KEY를 읽어옵니다.
@@ -7,115 +8,117 @@ API_KEY = os.environ.get("DATA_GO_KR_KEY")
 # 2. 저장할 파일 이름을 지정합니다.
 OUTPUT_FILE = "gyeongju_places.md"
 
+def clean_html(text):
+    """HTML 태그 및 줄바꿈 문자를 깔끔하게 지우거나 다듬어주는 함수입니다."""
+    if not text:
+        return ""
+    # 줄바꿈 태그 변환
+    text = text.replace("<br />", "\n").replace("<br>", "\n").replace("&nbsp;", " ")
+    # 나머지 HTML 태그들(<p> 등) 제거
+    text = re.sub(r'<[^>]+>', '', text)
+    return text.strip()
+
 def fetch_data():
-    # 만약 인증키가 설정되어 있지 않다면, 사용자가 테스트해볼 수 있도록 가짜(샘플) 데이터를 만듭니다.
     if not API_KEY:
         print("경고: DATA_GO_KR_KEY 설정이 없습니다. 샘플 데이터를 생성합니다.")
         create_sample_file()
         return
 
-    print("공공데이터포털에서 경주 맛집/카페 정보를 가져오는 중...")
+    print("공공데이터포털에서 경주 맛집 정보를 가져오는 중...")
     
-    # 한국관광공사의 국문 관광정보 서비스(TourAPI)의 음식점 정보 URL입니다.
-    # 경주 지역 코드(areaCode=35)와 음식점 타입(contentTypeId=39)을 사용합니다.
-    url = "http://apis.data.go.kr/B551011/KorService1/areaBasedList1"
-    
+    # 사용자님의 인증키가 활성화된 경주시 메뉴별음식점 API 엔드포인트입니다.
+    url = "https://apis.data.go.kr/5050000/menuRstrtService/getMenuRstrt"
     params = {
-        "serviceKey": API_KEY,          # 인증키 (DATA_GO_KR_KEY)
-        "numOfRows": "100",             # 가져올 데이터 개수 (최대 100개)
-        "pageNo": "1",                  # 첫 번째 페이지
-        "MobileOS": "ETC",              # 기기 구분 (기타)
-        "MobileApp": "GyeongjuApp",     # 서비스 이름
-        "_type": "json",                # 결과 형식을 JSON(글자 기반 데이터)으로 받기
-        "listYN": "Y",
-        "arrange": "A",                 # 이름 순서로 정렬
-        "contentTypeId": "39",          # 39는 음식점/카페 업종을 의미합니다.
-        "areaCode": "35"                # 35는 경주 지역 코드입니다.
+        "serviceKey": API_KEY,
+        "pageNo": "1",
+        "numOfRows": "100",  # 한 번에 최대 100개 상점 정보를 수집합니다.
+        "_type": "json"
     }
     
     try:
         response = requests.get(url, params=params, timeout=10)
         
-        # API 호출이 성공했는지 확인합니다.
-        if response.status_code != 200:
+        if response.status_code == 200:
+            data = response.json()
+            items = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
+            
+            if items:
+                write_markdown_file(items)
+                print(f"성공! 경주시 메뉴별음식점 API에서 데이터를 가져와 {OUTPUT_FILE} 파일을 생성했습니다.")
+                return
+            else:
+                print("응답은 성공했으나 데이터 내용이 비어있습니다. 샘플 데이터를 생성합니다.")
+                create_sample_file()
+        else:
             print(f"API 호출 실패 (코드: {response.status_code}). 샘플 데이터를 생성합니다.")
             create_sample_file()
-            return
             
-        data = response.json()
-        
-        # 응답 데이터에서 실제 맛집 목록이 들어있는 부분을 찾습니다.
-        items = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
-        
-        if not items:
-            print("가져온 데이터가 없거나 인증키가 아직 활성화되지 않았습니다. 샘플 데이터를 생성합니다.")
-            create_sample_file()
-            return
-            
-        # 데이터를 예쁜 마크다운 파일로 작성합니다.
-        write_markdown_file(items)
-        print(f"성공적으로 데이터를 가져와 {OUTPUT_FILE} 파일을 생성했습니다!")
-        
     except Exception as e:
-        print(f"에러가 발생했습니다: {e}")
-        print("오류 방지를 위해 샘플 데이터를 생성합니다.")
+        print(f"오류 발생: {e}. 샘플 데이터를 생성합니다.")
         create_sample_file()
 
 def write_markdown_file(items):
-    """API로 가져온 데이터를 예쁜 글(마크다운) 양식으로 바꾸어 파일로 저장합니다."""
+    """가져온 데이터를 NotebookLM이 가장 좋아하는 깔끔한 마크다운 문서로 작성합니다."""
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         f.write("# 🌸 경주 맛집 및 카페 정보\n\n")
-        f.write("공공데이터포털 API를 통해 주기적으로 자동 업데이트되는 경주 맛집 및 카페 목록입니다.\n\n")
+        f.write("공공데이터포털 경주시 API를 통해 실시간으로 수집된 경주 맛집 목록입니다. NotebookLM이 이해하기 쉽도록 정돈되어 있습니다.\n\n")
         
         for index, item in enumerate(items, 1):
-            title = item.get("title", "이름 없음")
-            address = item.get("addr1", "주소 정보 없음")
-            tel = item.get("tel", "전화번호 정보 없음")
-            image = item.get("firstimage", "") # 맛집 사진 주소
+            title = clean_html(item.get("CON_TITLE")) or "이름 없음"
+            address = clean_html(item.get("CON_ADDRESS")) or "주소 정보 없음"
+            homepage = clean_html(item.get("CON_HOMEPAGE"))
+            summary = clean_html(item.get("CON_SUMMARY"))
+            content = clean_html(item.get("CON_CONTENT"))
             
             f.write(f"### {index}. {title}\n")
             f.write(f"- 📍 **주소**: {address}\n")
-            f.write(f"- 📞 **연락처**: {tel}\n")
             
-            # 사진 정보가 있으면 사진도 글에 포함시킵니다.
-            if image:
-                f.write(f"- 🖼️ **대표 사진**: [사진 보기]({image})\n")
+            if summary:
+                f.write(f"- 📝 **주요 정보 및 메뉴**:\n")
+                # 정보를 줄바꿈 단위로 쪼개어 보기 좋게 정렬합니다.
+                for line in summary.split("\n"):
+                    if line.strip():
+                        # 불필요한 기호 제거 및 보기 좋게 포맷팅
+                        clean_line = line.strip().lstrip("-").strip()
+                        f.write(f"  - {clean_line}\n")
+            
+            # 긴 소개글이 있고, 그것이 요약본과 다를 때만 출력합니다.
+            if content and content != summary:
+                f.write(f"- 🔍 **상세 설명**: {content}\n")
+                
+            if homepage:
+                f.write(f"- 🔗 **관련 웹사이트**: [{title} 바로가기]({homepage})\n")
                 
             f.write("\n---\n\n")
 
 def create_sample_file():
-    """API 키가 없거나 에러가 났을 때 보여줄 샘플(테스트용) 데이터를 생성하는 함수입니다."""
+    """API 연동 전이나 키가 작동하지 않을 때 생성되는 샘플 파일입니다."""
     sample_items = [
         {
-            "title": "경주 맷돌순두부 (샘플)",
-            "addr1": "경상북도 경주시 북군길 9",
-            "tel": "054-775-6877",
-            "firstimage": "https://images.unsplash.com/photo-1546069901-ba9599a7e63c"
+            "CON_TITLE": "경주 맷돌순두부 (샘플)",
+            "CON_ADDRESS": "경상북도 경주시 북군길 9",
+            "CON_SUMMARY": "대표메뉴 : 순두부찌개, 파전\n영업시간 : 08:00 - 21:00",
+            "CON_CONTENT": "경주 보문단지 근처에서 유명한 맷돌 순두부 전문점입니다."
         },
         {
-            "title": "황남아덴 Aden (샘플 카페)",
-            "addr1": "경상북도 경주시 첨성로99번길 22",
-            "tel": "054-774-2016",
-            "firstimage": "https://images.unsplash.com/photo-1509042239860-f550ce710b93"
-        },
-        {
-            "title": "함양집 경주보문점 (샘플)",
-            "addr1": "경상북도 경주시 북군길 10-1",
-            "tel": "054-777-6900",
-            "firstimage": "https://images.unsplash.com/photo-1565299624946-b28f40a0ae38"
+            "CON_TITLE": "황남아덴 Aden (샘플 카페)",
+            "CON_ADDRESS": "경상북도 경주시 첨성로99번길 22",
+            "CON_SUMMARY": "대표메뉴 : 아덴커피, 긍정빵\n영업시간 : 10:00 - 22:00",
+            "CON_CONTENT": "황리단길에 위치한 아름다운 정원이 있는 한옥 대형 카페입니다."
         }
     ]
     
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         f.write("# 🌸 경주 맛집 및 카페 정보 (샘플 데이터)\n\n")
-        f.write("> **안내**: 아직 공공데이터포털 API 인증키(DATA_GO_KR_KEY)가 등록되지 않았거나 작동하지 않아 샘플 데이터를 보여줍니다.\n")
-        f.write("> 깃허브 세팅(Settings)에 인증키를 비밀값으로 등록하시면 실시간 실제 데이터로 자동으로 교체됩니다.\n\n")
+        f.write("> **안내**: API 연동 과정에서 오류가 있거나 대기 시간일 때 생성되는 예시 데이터입니다.\n\n")
         
         for index, item in enumerate(sample_items, 1):
-            f.write(f"### {index}. {item['title']}\n")
-            f.write(f"- 📍 **주소**: {item['addr1']}\n")
-            f.write(f"- 📞 **연락처**: {item['tel']}\n")
-            f.write(f"- 🖼️ **대표 사진**: [사진 보기]({item['firstimage']})\n")
+            f.write(f"### {index}. {item['CON_TITLE']}\n")
+            f.write(f"- 📍 **주소**: {item['CON_ADDRESS']}\n")
+            f.write(f"- 📝 **주요 정보 및 메뉴**:\n")
+            for line in item['CON_SUMMARY'].split("\n"):
+                f.write(f"  - {line}\n")
+            f.write(f"- 🔍 **상세 설명**: {item['CON_CONTENT']}\n")
             f.write("\n---\n\n")
             
     print(f"테스트용 샘플 데이터를 {OUTPUT_FILE}로 저장했습니다.")
