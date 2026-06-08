@@ -4,6 +4,9 @@ import requests
 
 # 1. 깃허브 세팅에 등록해주신 API 인증키 이름인 DATA_GO_KR_KEY를 읽어옵니다.
 API_KEY = os.environ.get("DATA_GO_KR_KEY")
+if API_KEY:
+    # 혹시 복사 붙여넣기 중에 따옴표(")나 공백이 들어갔을 경우를 대비해 깔끔하게 정리합니다.
+    API_KEY = API_KEY.strip().strip('"').strip("'")
 
 # 2. 저장할 파일 이름을 지정합니다.
 OUTPUT_FILE = "gyeongju_places.md"
