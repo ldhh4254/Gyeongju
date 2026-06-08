@@ -21,50 +21,72 @@ def clean_html(text):
     text = re.sub(r'<[^>]+>', '', text)
     return text.strip()
 
-def fetch_data():
-    if not API_KEY:
-        print("경고: DATA_GO_KR_KEY 설정이 없습니다. 샘플 데이터를 생성합니다.")
-        create_sample_file()
-        return
-
-    print("공공데이터포털에서 경주 맛집 정보를 가져오는 중...")
-    
-    # 사용자님의 인증키가 활성화된 경주시 메뉴별음식점 API 엔드포인트입니다.
-    url = "https://apis.data.go.kr/5050000/menuRstrtService/getMenuRstrt"
+def fetch_api_items(url, service_name):
+    """지정된 공공데이터 API 주소에서 데이터를 안전하게 가져옵니다."""
     params = {
         "serviceKey": API_KEY,
         "pageNo": "1",
         "numOfRows": "100",  # 한 번에 최대 100개 상점 정보를 수집합니다.
         "_type": "json"
     }
-    
     try:
         response = requests.get(url, params=params, timeout=10)
-        
         if response.status_code == 200:
             data = response.json()
             items = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
-            
-            if items:
-                write_markdown_file(items)
-                print(f"성공! 경주시 메뉴별음식점 API에서 데이터를 가져와 {OUTPUT_FILE} 파일을 생성했습니다.")
-                return
-            else:
-                print("응답은 성공했으나 데이터 내용이 비어있습니다. 샘플 데이터를 생성합니다.")
-                create_sample_file()
+            # 혹시 한 개만 들어와서 dict 형태인 경우 list로 감싸줍니다.
+            if isinstance(items, dict):
+                items = [items]
+            return items
+        elif response.status_code == 403:
+            print(f"[경고] {service_name} 권한 오류 (403): 공공데이터포털에서 이 API의 [활용신청]이 완료되었는지 확인해 주세요.")
+            return []
         else:
-            print(f"API 호출 실패 (코드: {response.status_code}). 샘플 데이터를 생성합니다.")
-            create_sample_file()
-            
+            print(f"[경고] {service_name} 호출 실패 (응답 코드: {response.status_code})")
+            return []
     except Exception as e:
-        print(f"오류 발생: {e}. 샘플 데이터를 생성합니다.")
+        print(f"[오류] {service_name} 통신 중 오류 발생: {e}")
+        return []
+
+def fetch_data():
+    if not API_KEY:
+        print("경고: DATA_GO_KR_KEY 설정이 없습니다. 샘플 데이터를 생성합니다.")
+        create_sample_file()
+        return
+
+    all_items = []
+    seen_titles = set()  # 중복 상점 등록을 방지하기 위한 세트
+
+    # 1) 첫 번째 API: 경주시 메뉴별 음식점 정보
+    url_menu = "https://apis.data.go.kr/5050000/menuRstrtService/getMenuRstrt"
+    print("1. 메뉴별 음식점 정보 가져오는 중...")
+    items_menu = fetch_api_items(url_menu, "메뉴별 음식점 API")
+    
+    # 2) 두 번째 API: 경주시 먹거리 핫플레이스 정보
+    url_hot = "https://apis.data.go.kr/5050000/eatHtpService/getEatHtp"
+    print("2. 먹거리 핫플레이스 정보 가져오는 중...")
+    items_hot = fetch_api_items(url_hot, "먹거리 핫플레이스 API")
+
+    # 두 데이터 합치기 (중복 상점명은 제거)
+    for item in items_menu + items_hot:
+        title = clean_html(item.get("CON_TITLE"))
+        if title and title not in seen_titles:
+            seen_titles.add(title)
+            all_items.append(item)
+
+    # 수집된 데이터가 있으면 파일 생성, 없으면 샘플 파일 생성
+    if all_items:
+        write_markdown_file(all_items)
+        print(f"[성공] 총 {len(all_items)}개의 식당/카페 정보를 수집하여 {OUTPUT_FILE} 파일을 업데이트했습니다.")
+    else:
+        print("\n[알림] 가져온 데이터가 없어 기존 샘플 데이터를 유지합니다.")
         create_sample_file()
 
 def write_markdown_file(items):
     """가져온 데이터를 NotebookLM이 가장 좋아하는 깔끔한 마크다운 문서로 작성합니다."""
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         f.write("# 🌸 경주 맛집 및 카페 정보\n\n")
-        f.write("공공데이터포털 경주시 API를 통해 실시간으로 수집된 경주 맛집 목록입니다. NotebookLM이 이해하기 쉽도록 정돈되어 있습니다.\n\n")
+        f.write("공공데이터포털 경주시 API를 통해 실시간으로 수집된 경주 맛집 및 핫플레이스 목록입니다. NotebookLM이 이해하기 쉽도록 정돈되어 있습니다.\n\n")
         
         for index, item in enumerate(items, 1):
             title = clean_html(item.get("CON_TITLE")) or "이름 없음"
@@ -78,14 +100,11 @@ def write_markdown_file(items):
             
             if summary:
                 f.write(f"- 📝 **주요 정보 및 메뉴**:\n")
-                # 정보를 줄바꿈 단위로 쪼개어 보기 좋게 정렬합니다.
                 for line in summary.split("\n"):
                     if line.strip():
-                        # 불필요한 기호 제거 및 보기 좋게 포맷팅
                         clean_line = line.strip().lstrip("-").strip()
                         f.write(f"  - {clean_line}\n")
             
-            # 긴 소개글이 있고, 그것이 요약본과 다를 때만 출력합니다.
             if content and content != summary:
                 f.write(f"- 🔍 **상세 설명**: {content}\n")
                 
